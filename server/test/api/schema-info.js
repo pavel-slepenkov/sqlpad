@@ -19,7 +19,7 @@ describe('api/schema-info', function () {
       role: 'admin',
       name: 'user1',
       data: {
-        dbfilename: 'user1.sqlite',
+        dbfilename: 'schema-info.user1.sqlite',
       },
     });
 
@@ -29,7 +29,7 @@ describe('api/schema-info', function () {
       role: 'admin',
       name: 'user2',
       data: {
-        dbfilename: 'user2.sqlite',
+        dbfilename: 'schema-info.user2.sqlite',
       },
     });
 

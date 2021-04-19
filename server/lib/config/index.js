@@ -1,13 +1,52 @@
-const _ = require('lodash');
+/* eslint-disable class-methods-use-this */
 const appLog = require('../app-log');
 const configItems = require('./config-items');
 const validateConnection = require('../validate-connection');
-const removedEnv = require('./removed-env');
-const fromDefault = require('./from-default');
-const fromEnv = require('./from-env');
-const fromCli = require('./from-cli');
-const fromFile = require('./from-file');
-const getOldConfigWarning = require('./get-old-config-warning');
+const {
+  getFromCli,
+  getFromDefault,
+  getFromEnv,
+  getOldConfigWarning,
+  parseConnectionsFromEnv,
+  isConnectionEnv,
+} = require('./config-utils');
+const drivers = require('../../drivers');
+
+const REMOVED_ENVS = [
+  'CERT_PASSPHRASE',
+  'CERT_PATH',
+  'DISABLE_AUTH',
+  'DISABLE_USERPASS_AUTH',
+  'ENABLE_LDAP_AUTH',
+  'GOOGLE_CLIENT_ID',
+  'GOOGLE_CLIENT_SECRET',
+  'KEY_PATH',
+  'LDAP_BASE_DN',
+  'LDAP_PASSWORD',
+  'LDAP_URL',
+  'LDAP_USERNAME',
+  'SAML_AUTH_CONTEXT',
+  'SAML_CALLBACK_URL',
+  'SAML_CERT',
+  'SAML_ENTRY_POINT',
+  'SAML_ISSUER',
+  'SAML_LINK_HTML',
+  'SERVICE_TOKEN_SECRET',
+  'SQLPAD_DEBUG',
+  'SQLPAD_DISABLE_AUTH_DEFAULT_ROLE',
+  'SQLPAD_HTTPS_PORT',
+  'SQLPAD_LDAP_BASE_DN',
+  'SQLPAD_LDAP_USERNAME',
+  'SQLPAD_SLACK_WEBHOOK',
+  'SQLPAD_SMTP_FROM',
+  'SQLPAD_SMTP_HOST',
+  'SQLPAD_SMTP_PASSWORD',
+  'SQLPAD_SMTP_PORT',
+  'SQLPAD_SMTP_SECURE',
+  'SQLPAD_SMTP_USER',
+  'SQLPAD_TABLE_CHART_LINKS_REQUIRE_AUTH',
+  'WHITELISTED_DOMAINS',
+];
 
 class Config {
   constructor(argv, env) {
@@ -16,18 +55,11 @@ class Config {
 
     const configFilePath = argv.config || env.SQLPAD_CONFIG;
 
-    const defaultConfig = fromDefault();
-    const envConfig = fromEnv(env);
-    const fileConfig = fromFile(configFilePath);
-    const cliConfig = fromCli(argv);
+    const defaultConfig = getFromDefault();
+    const envConfig = getFromEnv(env);
+    const cliConfig = getFromCli(argv);
 
-    const all = { ...defaultConfig, ...envConfig, ...fileConfig, ...cliConfig };
-
-    // TODO Remove in v6
-    // If whitelistedDomains was provided, and allowedDomains was not, use that as allowedDomains
-    if (all.whitelistedDomains && !all.allowedDomains) {
-      all.allowedDomains = all.whitelistedDomains;
-    }
+    const all = { ...defaultConfig, ...envConfig, ...cliConfig };
 
     // Clean string boolean values
     Object.keys(all).forEach((key) => {
@@ -43,7 +75,6 @@ class Config {
 
     this.configFilePath = configFilePath;
     this.envConfig = envConfig;
-    this.fileConfig = fileConfig;
     this.cliConfig = cliConfig;
     this.all = all;
   }
@@ -70,22 +101,109 @@ class Config {
       errors.push(getOldConfigWarning());
     }
 
-    // If fileConfig has something in it, an INI or JSON file was read
-    // These file formats are deprecated, replaced by .env file and env vars
-    if (this.configFilePath && Object.keys(this.fileConfig).length > 0) {
-      warnings.push(
-        `DEPRECATED CONFIG: .json and .ini file support deprecated. Use .env file or environment variables instead.`
+    const allowedStores = ['redis', 'database', 'file', 'memory'];
+    if (!allowedStores.includes(this.all.sessionStore)) {
+      errors.push(
+        `SQLPAD_SESSION_STORE must be one of ${allowedStores.join(', ')}`
       );
     }
 
+    if (!allowedStores.includes(this.all.queryResultStore)) {
+      errors.push(
+        `SQLPAD_QUERY_RESULT_STORE must be one of ${allowedStores.join(', ')}`
+      );
+    }
+
+    if (this.all.queryResultStore === 'redis' && !this.all.redisUri) {
+      errors.push(
+        `Redis query result store requires SQLPAD_REDIS_URI to be set`
+      );
+    }
+
+    if (this.all.sessionStore === 'redis' && !this.all.redisUri) {
+      errors.push(`Redis session store requires SQLPAD_REDIS_URI to be set`);
+    }
+
     // Check for any old environment variables in env.
-    // This must be handled separately from other unknown checks,
-    // as fromEnv() only gets config it knows about, so it will never have unknown values
-    removedEnv.forEach((key) => {
-      if (this.env.hasOwnProperty(key)) {
+    // Any key that starts with SQLPAD_ that isn't known should raise a message.
+    // Exceptions:
+    // - SQLPAD_CONNECTIONS__ variables as they are dynamic and depend on database defined
+    Object.keys(this.env).forEach((key) => {
+      if (key.startsWith('SQLPAD_') && !isConnectionEnv(key)) {
+        const foundDefinition = configItems.find((item) => item.envVar === key);
+        if (!foundDefinition) {
+          // If key wasn't found, check known removed variables
+          // If previously used, raise error, otherwise log warning
+          // Environments like k8s may use SQLPAD_* variables for other things
+          const foundRemoved = REMOVED_ENVS.find((removed) => removed === key);
+          if (foundRemoved) {
+            errors.push(
+              `CONFIG NOT RECOGNIZED: Environment variable "${key}" no longer used`
+            );
+          } else {
+            warnings.push(
+              `CONFIG NOT RECOGNIZED: Environment variable "${key}"`
+            );
+          }
+        }
+      }
+    });
+
+    // Parse connections from env and error for anything invalid
+    // This is easy to mess up and being strict will help avoid confusion
+    const parsedConnections = parseConnectionsFromEnv(this.env);
+    parsedConnections.forEach((parsedConnection) => {
+      const {
+        id,
+        name,
+        description,
+        driver,
+        multiStatementTransactionEnabled,
+        idleTimeoutSeconds,
+        ...driverSpecificFields
+      } = parsedConnection;
+      if (!name) {
         errors.push(
-          `CONFIG NOT RECOGNIZED: Environment variable "${key}" no longer supported.`
+          `Environment config SQLPAD_CONNECTIONS__${id}__name missing`
         );
+      }
+      if (!driver) {
+        errors.push(
+          `Environment config SQLPAD_CONNECTIONS__${id}__driver missing`
+        );
+      } else {
+        const driverImplementation = drivers[driver];
+        if (!driverImplementation) {
+          errors.push(
+            `Environment config SQLPAD_CONNECTIONS__${id}__driver invalid. "${driver}" not a supported driver.`
+          );
+        } else {
+          const validDriverFieldMap = {};
+          driverImplementation.fields.forEach((fieldConfig) => {
+            validDriverFieldMap[fieldConfig.key] = true;
+          });
+          Object.keys(driverSpecificFields).forEach((driverField) => {
+            if (!validDriverFieldMap[driverField]) {
+              errors.push(
+                `Environment config SQLPAD_CONNECTIONS__${id}__${driverField} invalid. "${driverField}" not a known field for ${driver}.`
+              );
+            }
+          });
+
+          // parsedConnections are also run through a validateConnections function on read in .getConnections()
+          // Run parsedConnection through that function now as well to catch any missed checks here
+          // This connection loading/checking should be cleaned up in future to reduce duplicate checks
+          // TODO - perform validation checks in constructor, getValidations() gets these values
+          try {
+            validateConnection(parsedConnection);
+          } catch (error) {
+            errors.push(
+              `Environment connection configuration failed for ${
+                parsedConnection.id
+              }. ${error.toString()}`
+            );
+          }
+        }
       }
     });
 
@@ -102,22 +220,9 @@ class Config {
       }
     });
 
-    // Check fileConfig for unknown keys
-    // Connections key is filtered out from consideration here because it is not driven by config-items
-    // If key is not found in config items, raise error message to prevent application startup
-    Object.keys(this.fileConfig)
-      .filter((key) => key !== 'connections')
-      .filter((key) => !configItems.find((item) => item.key === key))
-      .forEach((key) => {
-        errors.push(
-          `CONFIG NOT RECOGNIZED: Key "${key}" in file ${this.configFilePath}.`
-        );
-      });
-
     // Check for deprecated keys provided in config
     const userProvidedConfigs = {
       ...this.envConfig,
-      ...this.fileConfig,
       ...this.cliConfig,
     };
     Object.keys(userProvidedConfigs)
@@ -137,35 +242,25 @@ class Config {
     };
   }
 
-  smtpConfigured() {
-    return (
-      this.all.smtpHost &&
-      this.all.smtpUser &&
-      this.all.smtpFrom &&
-      this.all.smtpPort &&
-      this.all.publicUrl
-    );
-  }
-
   googleAuthConfigured() {
     return (
       this.all.publicUrl &&
-      (this.all.googleClientId || this.all.googleClientId_d) &&
-      (this.all.googleClientSecret || this.all.googleClientSecret_d)
+      this.all.googleClientId &&
+      this.all.googleClientSecret
     );
   }
 
   samlAuthConfigured() {
     return (
-      (this.all.samlEntryPoint || this.all.samlEntryPoint_d) &&
-      (this.all.samlIssuer || this.all.samlIssuer_d) &&
-      (this.all.samlCallbackUrl || this.all.samlCallbackUrl_d) &&
-      (this.all.samlCert || this.all.samlCert_d) &&
-      (this.all.samlAuthContext || this.all.samlAuthContext_d)
+      this.all.samlEntryPoint &&
+      this.all.samlIssuer &&
+      this.all.samlCallbackUrl &&
+      this.all.samlCert &&
+      this.all.samlAuthContext
     );
   }
 
-  oidcConfigured() {
+  oidcLegacyConfigured() {
     return Boolean(
       this.all.publicUrl &&
         this.all.oidcClientId &&
@@ -177,77 +272,52 @@ class Config {
     );
   }
 
+  // oidc configured only needs to check for minimal setup
+  // With newer openid-client we can detect auth/token/user urls
+  // If detecting the endpoints is not available, many additional oidc config options need to be provided
+  // This can happen after passport-openidconnect is removed
+  oidcConfigured() {
+    return Boolean(
+      this.all.publicUrl &&
+        this.all.oidcClientId &&
+        this.all.oidcClientSecret &&
+        this.all.oidcIssuer &&
+        // The additional URLs *should not* be specified
+        !this.all.oidcAuthorizationUrl &&
+        !this.all.oidcTokenUrl &&
+        !this.all.oidcUserInfoUrl
+    );
+  }
+
   /**
    * Get connections from config.
-   * These are provided at runtime and not upserted
-   * This allows supporting cases where connections can be defined then later removed via config changes alone
+   * These are provided at runtime and not upserted into the backing database.
+   * This allows supporting cases where connections can be defined then later removed via config changes alone.
    *
-   * For environment variables:
-   * connection env vars must follow the format:
-   * SQLPAD_CONNECTIONS__<connectionId>__<connectionFieldName>
-   *
-   * <connectionId> can be any value to associate a grouping a fields to a connection instance
-   * If supplying a connection that was previously defined in the embedded database,
-   * this would map internally to connection.id object.
-   *
-   * <connectionFieldName> should be a field name identified in drivers.
-   *
-   * To define connections via envvars, `driver` field should be supplied.
-   * id field is not required, as it is defined in second env var fragment.
-   *
-   * Example: SQLPAD_CONNECTIONS__ab123__sqlserverEncrypt=""
-   *
-   * From file, resulting parsed configuration from file is expected to follow format `connections.<id>.<fieldname>`
-   * {
-   *   connections: {
-   *     ab123: {
-   *       sqlserverEncrypt: true
-   *     }
-   *   }
-   * }
+   * Connections derived from config will be decorated with `editable` = false.
    *
    * @param {object} [env] - optional environment override for testing
-   * @returns {array<object>} arrayOfConnections
+   * @returns {array<object>} array of Connections
    */
   getConnections(env = process.env) {
-    // Create a map of connections from parsing environment variable
-    const connectionsMapFromEnv = Object.keys(env)
-      .filter((key) => key.startsWith('SQLPAD_CONNECTIONS__'))
-      .reduce((connectionsMap, envVar) => {
-        // eslint-disable-next-line no-unused-vars
-        const [prefix, id, field] = envVar.split('__');
-        if (!connectionsMap[id]) {
-          connectionsMap[id] = {};
-        }
-        connectionsMap[id][field] = env[envVar];
-        return connectionsMap;
-      }, {});
+    const parsedConnections = parseConnectionsFromEnv(env);
 
-    // Get copy of connections from config file
-    const { connections } = _.cloneDeep(this.fileConfig);
-
-    // connections key from file matches format that is constructed from env
-    // merge the 2 together then create an array out of them
-    const connectionsMap = { ...connectionsMapFromEnv, ...connections };
-
-    const connectionsFromConfig = [];
-    Object.keys(connectionsMap).forEach((id) => {
+    const cleanedConnections = [];
+    parsedConnections.forEach((connection) => {
       try {
-        let connection = connectionsMap[id];
-        connection.id = id;
         connection = validateConnection(connection);
         connection.editable = false;
-        connectionsFromConfig.push(connection);
+        cleanedConnections.push(connection);
       } catch (error) {
         appLog.error(
           error,
           'Environment connection configuration failed for %s',
-          id
+          connection.id
         );
       }
     });
 
-    return connectionsFromConfig;
+    return cleanedConnections;
   }
 }
 

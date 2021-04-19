@@ -1,5 +1,6 @@
 /* eslint-disable no-await-in-loop */
 const assert = require('assert');
+const bytes = require('bytes');
 const fs = require('fs');
 const util = require('util');
 const path = require('path');
@@ -23,6 +24,7 @@ describe('api/batches', function () {
   let query;
   let connection;
   let batch;
+  let batchWithoutQueryId;
   let statement1;
   let statement2;
 
@@ -39,6 +41,7 @@ describe('api/batches', function () {
     utils = new TestUtils({
       queryResultMaxRows: 3,
       queryHistoryRetentionTimeInDays: 0,
+      queryResultStore: 'file',
     });
     await utils.init(true);
 
@@ -68,6 +71,51 @@ describe('api/batches', function () {
     assert(batch.id);
     assert.equal(batch.statements.length, 2);
     assert.equal(batch.status, 'started');
+  });
+
+  it('creates batch without query id', async function () {
+    batchWithoutQueryId = await utils.post('admin', `/api/batches`, {
+      connectionId: connection.id,
+      batchText: queryText,
+      selectedText: queryText,
+    });
+    assert(batchWithoutQueryId.id);
+  });
+
+  it('gets list for query id including statements', async function () {
+    const batches = await utils.get(
+      'admin',
+      `/api/batches?queryId=${query.id}&includeStatements=true`
+    );
+    const foundBatch = batches.find((b) => b.id === batch.id);
+    assert.strictEqual(foundBatch.statements.length, 2);
+  });
+
+  it('gets list for query id without statements', async function () {
+    const batches = await utils.get(
+      'admin',
+      `/api/batches?queryId=${query.id}&includeStatements=false`
+    );
+    const foundBatch = batches.find((b) => b.id === batch.id);
+    assert(!foundBatch.statements);
+  });
+
+  it('gets list for no queryId including statements', async function () {
+    const batches = await utils.get(
+      'admin',
+      `/api/batches?queryId=null&includeStatements=true`
+    );
+    const foundBatch = batches.find((b) => b.id === batchWithoutQueryId.id);
+    assert.strictEqual(foundBatch.statements.length, 2);
+  });
+
+  it('gets list for no query id without statements', async function () {
+    const batches = await utils.get(
+      'admin',
+      `/api/batches?queryId=null&includeStatements=false`
+    );
+    const foundBatch = batches.find((b) => b.id === batchWithoutQueryId.id);
+    assert(!foundBatch.statements);
   });
 
   it('GETs finished result', async function () {
@@ -175,7 +223,7 @@ describe('api/batches', function () {
 
   it('Only batch creator can view batch', async function () {
     const adminBatches = await utils.get('admin', `/api/batches`);
-    assert.equal(adminBatches.length, 1);
+    assert.equal(adminBatches.length, 2);
     const editorBatches = await utils.get('editor', `/api/batches`);
     assert.equal(editorBatches.length, 0);
     await utils.get('editor', `/api/batches/${batch.id}`, 403);
@@ -198,11 +246,24 @@ describe('api/batches', function () {
     assert.deepEqual(b.statements[0].error, {
       title: 'SQLITE_ERROR: incomplete input',
     });
-    assert.equal(b.statements[1].status, 'queued');
+
+    await utils.get(
+      'admin',
+      `/api/statements/${b.statements[0].id}/results`,
+      404
+    );
+
+    assert.equal(b.statements[1].status, 'cancelled');
     assert.equal(b.statements[1].rowCount, null, 'no rowCount');
     assert.equal(b.statements[1].resultsPath, null, 'no resultpath');
     assert.equal(b.statements[1].startTime, null, 'no startTime');
     assert.equal(b.statements[1].stopTime, null, 'no stopTime');
+
+    await utils.get(
+      'admin',
+      `/api/statements/${b.statements[1].id}/results`,
+      404
+    );
   });
 
   it('statement without rows does not create file', async function () {
@@ -292,5 +353,26 @@ describe('api/batches', function () {
     }
 
     assert(!exists);
+  });
+
+  it('returns 413 on large payload', async function () {
+    const singleQuery = `SELECT 1 AS id UNION SELECT 2 AS id UNION SELECT 3 AS id UNION SELECT 4 AS id;`;
+    const bodyLimit = utils.config.get('bodyLimit');
+    const maxPayload = bytes.parse(bodyLimit);
+    // assuming UTF-8: one byte per ASCII char
+    const numberOfQueries = maxPayload / singleQuery.length;
+    let massiveQuery = ``;
+    for (let i = 0; i < numberOfQueries; ++i) {
+      massiveQuery = massiveQuery.concat(singleQuery);
+    }
+    await utils.post(
+      'admin',
+      `/api/batches`,
+      {
+        connectionId: connection.id,
+        batchText: massiveQuery,
+      },
+      413
+    );
   });
 });

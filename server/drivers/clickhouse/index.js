@@ -1,4 +1,8 @@
-const clickhouse = require('./_clickhouse');
+// `clickhouse` package does not provide column information, and uses `request`
+// May need to move to `node-clickhouse` or other library down the road
+// https://clickhouse.tech/docs/en/interfaces/third-party/client-libraries/
+const { ClickHouse } = require('clickhouse');
+const sqlLimiter = require('sql-limiter');
 const { formatSchemaQueryResults } = require('../utils');
 
 const id = 'clickhouse';
@@ -28,36 +32,57 @@ function getClickHouseSchemaSql(database) {
  * @param {string} query
  * @param {object} connection
  */
-function runQuery(query, connection) {
+async function runQuery(query, connection) {
   let incomplete = false;
-  const rows = [];
+  let rows = [];
+
+  const ONE_MILLION = 1000000;
+  const maxRows = connection.maxRows || ONE_MILLION;
+  const maxRowsPlusOne = maxRows + 1;
+
+  let limitedQuery = sqlLimiter.limit(query, ['limit'], maxRowsPlusOne);
+
   const port = connection.port || 8123;
-  const clickhouseConfig = {
-    url: `http://${connection.host}:${port}`,
-    user: connection.username || 'default',
+  const protocol = connection.useHTTPS ? 'https' : 'http';
+  const url = `${protocol}://${connection.host}`;
+  const database = connection.database;
+  const basicAuth = {
+    username: connection.username || 'default',
     password: connection.password || '',
-    database: connection.database || 'default',
   };
-  query = `${query} FORMAT JSON`;
-  return clickhouse.send(clickhouseConfig, query).then((result) => {
-    if (!result) {
-      throw new Error('No result returned');
-    }
-    let { data, columns } = result;
-    if (data.length > connection.maxRows) {
-      incomplete = true;
-      data = data.slice(0, connection.maxRows);
-    }
-    for (let r = 0; r < data.length; r++) {
-      const row = {};
-      for (let c = 0; c < columns.length; c++) {
-        // row[columns[c].name] = data[r][c];
-        row[columns[c].name] = data[r][columns[c].name];
-      }
-      rows.push(row);
-    }
-    return { rows, incomplete };
+
+  const clickhouse = new ClickHouse({
+    url,
+    port,
+    basicAuth,
+    format: 'json',
+    config: {
+      database,
+    },
   });
+
+  // clickhouse package will append ' FORMAT JSON' to certain queries,
+  // but does not handle CTEs WITH... SELECT.
+  // This is a modified approach used in package:
+  // https://github.com/TimonKK/clickhouse/blob/9dea3c0c3e4f3e2fe64e59dad762f1db044bf9bf/index.js#L479
+  // If a certain query type is detected and FORMAT JSON is not included, append it
+  // CTEs will be detected as following statement type (WITH cte AS (...) SELECT) will have type of "select"
+  const statementType = sqlLimiter.getStatementType(limitedQuery);
+  if (
+    ['select', 'show', 'exists'].indexOf(statementType) > -1 &&
+    !limitedQuery
+      .trim()
+      .match(/FORMAT\s*(JSON|TabSeparatedWithNames|CSVWithNames)/im)
+  ) {
+    limitedQuery += ' FORMAT JSON';
+  }
+
+  rows = await clickhouse.query(limitedQuery).toPromise();
+  if (rows.length > maxRows) {
+    incomplete = true;
+    rows = rows.slice(0, maxRows);
+  }
+  return { rows, incomplete };
 }
 
 /**
@@ -105,6 +130,11 @@ const fields = [
     key: 'database',
     formType: 'TEXT',
     label: 'Database Name (optional)',
+  },
+  {
+    key: 'useHTTPS',
+    formType: 'CHECKBOX',
+    label: 'Use HTTPS',
   },
 ];
 

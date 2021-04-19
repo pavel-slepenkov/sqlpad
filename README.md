@@ -1,8 +1,8 @@
 # SQLPad
 
-A web app for writing and running SQL queries and visualizing the results. Supports Postgres, MySQL, SQL Server, ClickHouse, Crate, Vertica, Presto, SAP HANA, Cassandra, Snowflake, Google BigQuery, SQLite, and many more via [ODBC](https://github.com/rickbergfalk/sqlpad/wiki/ODBC).
+A web app for writing and running SQL queries and visualizing the results. Supports Postgres, MySQL, SQL Server, ClickHouse, Crate, Vertica, Trino, Presto, SAP HANA, Cassandra, Snowflake, Google BigQuery, SQLite, and many more via [ODBC](https://github.com/sqlpad/sqlpad/wiki/ODBC).
 
-![SQLPad Query Editor](https://rickbergfalk.github.io/sqlpad/images/screenshots/v5.1.0.png)
+![SQLPad Query Editor](https://user-images.githubusercontent.com/303966/99915755-32f78e80-2ccb-11eb-9f74-b18846d6108d.png)
 
 ## Docker Image
 
@@ -10,31 +10,27 @@ The docker image runs on port 3000 and uses `/var/lib/sqlpad` for the embedded d
 
 `latest` tag is continuously built from latest commit in repo. Only use that if you want to live on the edge, otherwise use specific version tags to ensure stability.
 
-See [docker-examples](https://github.com/rickbergfalk/sqlpad/tree/master/docker-examples) directory for example docker-compose setup with SQL Server.
+See [docker-examples](https://github.com/sqlpad/sqlpad/tree/master/docker-examples) directory for example docker-compose setup with SQL Server.
 
 ## Development
 
-For instructions on installing/running SQLPad from git repo see [developer guide](https://github.com/rickbergfalk/sqlpad/blob/master/DEVELOPER-GUIDE.md)
+For instructions on installing/running SQLPad from git repo see [DEVELOPER-GUIDE.md](https://github.com/sqlpad/sqlpad/blob/master/DEVELOPER-GUIDE.md)
 
-## Configuration
+## Project Documentation
 
-- [project page - configuration](https://rickbergfalk.github.io/sqlpad/#/configuration)
-- [docs/configuration.md](https://github.com/rickbergfalk/sqlpad/blob/master/docs/configuration.md)
+Documentation located at [https://sqlpad.github.io/sqlpad](https://sqlpad.github.io/sqlpad).
 
-### Connection configuration
+Documentation source located in [docs directory](https://github.com/sqlpad/sqlpad/tree/master/docs), built/rendered by docsify.
 
-- [project page - connections](https://rickbergfalk.github.io/sqlpad/#/connections)
-- [docs/connections.md](https://github.com/rickbergfalk/sqlpad/blob/master/docs/connections.md)
+## Project Status
 
-## Seed Data (experimental)
+Despite recent development this last year and move to GitHub org, SQLPad is mostly "finished" in that it won't radically be changing from what it is today.
 
-- [project page - seed data](https://rickbergfalk.github.io/sqlpad/#/seed-data)
-- [docs/seed-data.md](https://github.com/rickbergfalk/sqlpad/blob/master/docs/seed-data.md)
+Maintenance releases and bugfixes guaranteed through 2021.
 
-## Logging
+## Contributing
 
-- [project page - logging](https://rickbergfalk.github.io/sqlpad/#/logging)
-- [docs/logging.md](https://github.com/rickbergfalk/sqlpad/blob/master/docs/logging.md)
+[Collaborators always welcome!](https://github.com/sqlpad/sqlpad/blob/master/CONTRIBUTING.md)
 
 ## License
 

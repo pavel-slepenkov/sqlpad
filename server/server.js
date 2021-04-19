@@ -49,7 +49,6 @@ if (argv.help || cliHas('help')) {
 }
 
 // If an .env file was passed for config, call dotenv to apply it to process.env
-// .env files are not processed like .ini/.json files
 const configFilePath = argv.config || process.env.SQLPAD_CONFIG;
 if (configFilePath && configFilePath.includes('.env')) {
   const result = dotenv.config({ path: configFilePath });
@@ -79,11 +78,10 @@ makeDb(config);
 
 const baseUrl = config.get('baseUrl');
 const ip = config.get('ip');
-const port = config.get('port');
-const certPassphrase =
-  config.get('certPassphrase') || config.get('certPassphrase_d');
-const keyPath = config.get('keyPath') || config.get('keyPath_d');
-const certPath = config.get('certPath') || config.get('certPath_d');
+const port = parseInt(config.get('port'), 10);
+const certPassphrase = config.get('certPassphrase');
+const keyPath = config.get('keyPath');
+const certPath = config.get('certPath');
 const systemdSocket = config.get('systemdSocket');
 const timeoutSeconds = config.get('timeoutSeconds');
 
@@ -99,7 +97,7 @@ function isFdObject(ob) {
 //
 // More info
 //
-// https://github.com/rickbergfalk/sqlpad/pull/185
+// https://github.com/sqlpad/sqlpad/pull/185
 // https://www.freedesktop.org/software/systemd/man/systemd.socket.html
 // https://www.freedesktop.org/software/systemd/man/sd_listen_fds.html
 function detectPortOrSystemd(port) {
@@ -129,12 +127,25 @@ function detectPortOrSystemd(port) {
 let server;
 
 async function startServer() {
-  const { models, nedb, sequelizeDb } = await getDb();
+  const { models, sequelizeDb } = await getDb();
 
   // Before application starts up apply any backend database migrations needed
   // If --migrate / migrate was specified, the process exits afterwards
   // Automatically running migrations may be disabled via config.
-  const migrator = makeMigrator(config, appLog, nedb, sequelizeDb.sequelize);
+  const migrator = makeMigrator(config, appLog, sequelizeDb.sequelize);
+
+  // Check to ensure SQLPad is either v0 (not yet initialized) or v5 or later
+  // As of v6, the embedded db migrations needed to move off of v3/v4 are no longer included.
+  const dbMajorVersion = await migrator.getDbMajorVersion();
+  const incompatibleDbVersion = dbMajorVersion >= 1 && dbMajorVersion <= 4;
+
+  if (incompatibleDbVersion) {
+    appLog.error(
+      'SQLPad database not compatible with this version of SQLPad. Migrate to version 5 prior to running version 6 or later.'
+    );
+    process.exit(1);
+  }
+
   const isUpToDate = await migrator.schemaUpToDate();
 
   const runMigrations = migrateOnly || config.get('dbAutomigrate');

@@ -3,8 +3,12 @@ const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
 const pino = require('pino');
+const redis = require('redis');
 const session = require('express-session');
 const FileStore = require('session-file-store')(session);
+const MemoryStore = require('memorystore')(session);
+const SequelizeStore = require('connect-session-sequelize')(session.Store);
+const RedisStore = require('connect-redis')(session);
 const appLog = require('./lib/app-log');
 const Webhooks = require('./lib/webhooks.js');
 const bodyParser = require('body-parser');
@@ -91,7 +95,11 @@ async function makeApp(config, models) {
     app.use(favicon(icoPath));
   }
 
-  app.use(bodyParser.json());
+  app.use(
+    bodyParser.json({
+      limit: config.get('bodyLimit'),
+    })
+  );
   app.use(
     bodyParser.urlencoded({
       extended: true,
@@ -99,22 +107,56 @@ async function makeApp(config, models) {
   );
 
   const cookieMaxAgeMs = parseInt(config.get('sessionMinutes'), 10) * 60 * 1000;
-  const sessionPath = path.join(config.get('dbPath'), '/sessions');
 
-  app.use(
-    session({
-      store: new FileStore({
+  const sessionOptions = {
+    saveUninitialized: false,
+    resave: true,
+    rolling: true,
+    cookie: { maxAge: cookieMaxAgeMs },
+    secret: config.get('cookieSecret'),
+    name: config.get('cookieName'),
+  };
+  const sessionStore = config.get('sessionStore').toLowerCase();
+
+  switch (sessionStore) {
+    case 'file': {
+      const sessionPath = path.join(config.get('dbPath'), '/sessions');
+      sessionOptions.store = new FileStore({
         path: sessionPath,
         logFn: () => {},
-      }),
-      saveUninitialized: false,
-      resave: true,
-      rolling: true,
-      cookie: { maxAge: cookieMaxAgeMs },
-      secret: config.get('cookieSecret'),
-      name: config.get('cookieName'),
-    })
-  );
+      });
+      break;
+    }
+    case 'memory': {
+      sessionOptions.store = new MemoryStore({
+        checkPeriod: cookieMaxAgeMs,
+      });
+      break;
+    }
+    case 'database': {
+      sessionOptions.store = new SequelizeStore({
+        db: models.sequelizeDb.sequelize,
+        table: 'Sessions',
+      });
+      // SequelizeStore supports the touch method so per the express-session docs this should be set to false
+      sessionOptions.resave = false;
+      // SequelizeStore docs mention setting this to true if SSL is done outside of Node
+      // Not sure we have any way of knowing based on current config
+      // sessionOptions.proxy = true;
+      break;
+    }
+    case 'redis': {
+      const redisClient = redis.createClient(config.get('redisUri'));
+      sessionOptions.store = new RedisStore({ client: redisClient });
+      sessionOptions.resave = false;
+      break;
+    }
+    default: {
+      throw new Error(`Invalid session store ${sessionStore}`);
+    }
+  }
+
+  app.use(session(sessionOptions));
 
   const baseUrl = config.get('baseUrl');
 
@@ -129,7 +171,6 @@ async function makeApp(config, models) {
   /*  Routes
   ============================================================================= */
   const preAuthRouters = [
-    require('./routes/forgot-password.js'),
     require('./routes/password-reset.js'),
     require('./routes/signout.js'),
     require('./routes/signup.js'),
@@ -156,6 +197,7 @@ async function makeApp(config, models) {
     require('./routes/connections.js'),
     require('./routes/connection-accesses.js'),
     require('./routes/connection-clients.js'),
+    require('./routes/connection-schema.js'),
     require('./routes/test-connection.js'),
     require('./routes/query-history.js'),
     require('./routes/schema-info.js'),
@@ -185,6 +227,11 @@ async function makeApp(config, models) {
       return next(err);
     }
     appLog.error(err);
+    if (err && err.type === 'entity.too.large') {
+      return res.status(413).json({
+        title: 'Payload Too Large',
+      });
+    }
     return res.status(500).json({
       title: 'Internal Server Error',
     });
@@ -204,9 +251,11 @@ async function makeApp(config, models) {
   if (fs.existsSync(indexTemplatePath)) {
     const html = fs.readFileSync(indexTemplatePath, 'utf8');
     const baseUrlHtml = html
+      .replace(/="\/assets/g, `="${baseUrl}/assets`)
       .replace(/="\/stylesheets/g, `="${baseUrl}/stylesheets`)
       .replace(/="\/javascripts/g, `="${baseUrl}/javascripts`)
       .replace(/="\/images/g, `="${baseUrl}/images`)
+      .replace(/="\/favicon/g, `="${baseUrl}/favicon`)
       .replace(/="\/fonts/g, `="${baseUrl}/fonts`)
       .replace(/="\/static/g, `="${baseUrl}/static`);
     app.use((req, res) => res.send(baseUrlHtml));

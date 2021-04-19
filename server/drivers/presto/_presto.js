@@ -10,7 +10,12 @@ function wait(ms) {
 
 // Get Presto headers from config
 function getHeaders(config) {
-  const headers = { 'X-Presto-User': config.user };
+  const headers = {
+    'X-Presto-User': config.user,
+    Authorization:
+      'Basic ' +
+      Buffer.from(`${config.user}:${config.password}`).toString('base64'),
+  };
   if (config.catalog) {
     headers['X-Presto-Catalog'] = config.catalog;
   }
@@ -51,7 +56,7 @@ function handleStatementAndGetMore(results, statement, config) {
   if (statement.error) {
     // A lot of other error data available,
     // but error.message contains the detail on syntax issue
-    return Promise.reject(statement.error.message);
+    return Promise.reject(new Error(statement.error.message));
   }
   results = updateResults(results, statement);
   if (!statement.nextUri) {

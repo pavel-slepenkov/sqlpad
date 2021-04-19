@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid');
 const rimraf = require('rimraf');
 const mkdirp = require('mkdirp');
 const path = require('path');
+const redis = require('redis');
 const request = require('supertest');
 const detectPort = require('detect-port');
 const bodyParser = require('body-parser');
@@ -16,6 +17,7 @@ const makeApp = require('../app');
 const makeMigrator = require('../lib/make-migrator');
 const loadSeedData = require('../lib/load-seed-data');
 const ensureConnectionAccess = require('../lib/ensure-connection-access');
+const ensureAdmin = require('../lib/ensure-admin');
 
 // At the start of any test run, clean out the root artifacts directory
 before(function (done) {
@@ -30,6 +32,8 @@ class TestUtils {
         // Eventually these will be moved to sqlite and we can be fully-in-memory
         dbPath: path.join(__dirname, '/artifacts/defaultdb'),
         dbInMemory: true,
+        sessionStore: 'memory',
+        queryResultStore: 'memory',
         appLogLevel: 'error',
         backendDatabaseUri: TestUtils.randomize_dbname(
           process.env.SQLPAD_BACKEND_DB_URI
@@ -53,7 +57,6 @@ class TestUtils {
     this.sequelizeDb = undefined;
     this.app = undefined;
     this.models = undefined;
-    this.nedb = undefined;
 
     this.users = {
       admin: {
@@ -72,6 +75,20 @@ class TestUtils {
         role: 'editor',
       },
     };
+  }
+
+  static redisAvailable(redisUri) {
+    return new Promise((resolve) => {
+      const client = redis.createClient(redisUri);
+      client.on('error', () => {
+        resolve(false);
+        client.end(true);
+      });
+      client.on('connect', () => {
+        resolve(true);
+        client.end(true);
+      });
+    });
   }
 
   static async makeHookServer() {
@@ -141,15 +158,13 @@ class TestUtils {
     }
 
     db.makeDb(this.config, this.instanceAlias);
-    const { models, nedb, sequelizeDb } = await db.getDb(this.instanceAlias);
+    const { models, sequelizeDb } = await db.getDb(this.instanceAlias);
     this.models = models;
-    this.nedb = nedb;
     this.sequelizeDb = sequelizeDb;
 
     this.migrator = makeMigrator(
       this.config,
       this.appLog,
-      this.nedb,
       this.sequelizeDb.sequelize
     );
   }
@@ -186,6 +201,7 @@ class TestUtils {
     await this.prepDbDir();
     await this.initDbs();
     await this.migrate();
+    await ensureAdmin(this.models, this.config);
     await this.loadSeedData();
     await ensureConnectionAccess(this.sequelizeDb, this.config);
 
@@ -193,7 +209,7 @@ class TestUtils {
 
     assert.throws(() => {
       db.makeDb(this.config, this.instanceAlias);
-    }, 'ensure nedb can be made once');
+    }, 'ensure db can be made once');
 
     if (withUsers) {
       for (const key of Object.keys(this.users)) {

@@ -1,8 +1,8 @@
 # SQLPad
 
-A web app for writing and running SQL queries and visualizing the results. Supports Postgres, MySQL, SQL Server, ClickHouse, Crate, Vertica, Presto, SAP HANA, Snowflake, BigQuery, SQLite, and many others via ODBC.
+A web app for writing and running SQL queries and visualizing the results. Supports Postgres, MySQL, SQL Server, ClickHouse, Crate, Vertica, Trino, Presto, Pinot, Drill, SAP HANA, Snowflake, BigQuery, SQLite, and many others via ODBC.
 
-<img class="screenshot" src="images/screenshots/v5.1.0.png" data-origin="images/screenshots/v5.1.0.png" alt="SQLPad screenshot" >
+<img class="screenshot" src="https://user-images.githubusercontent.com/303966/99915755-32f78e80-2ccb-11eb-9f74-b18846d6108d.png" alt="SQLPad screenshot" >
 
 ## Database Support
 
@@ -26,6 +26,9 @@ A web app for writing and running SQL queries and visualizing the results. Suppo
     <img src="images/logo-clickhouse.png" data-origin="images/logo-clickhouse.png" alt="ClickHouse" >
   </div>
   <div class="db-container db-container-bg">
+    <img src="images/logo-trino.svg" data-origin="images/logo-trino.svg" alt="Trino" style="height: 120px;" >
+  </div>
+  <div class="db-container db-container-bg">
     <img src="images/logo-presto.png" data-origin="images/logo-presto.png" alt="Presto" >
   </div>
   <div class="db-container">
@@ -33,6 +36,9 @@ A web app for writing and running SQL queries and visualizing the results. Suppo
   </div>
   <div class="db-container db-container-bg">
     <img src="images/logo-apachedrill.png" data-origin="images/logo-apachedrill.png" alt="Apache Drill" >
+  </div>
+  <div class="db-container">
+    <img src="images/logo-pinot.svg" data-origin="images/logo-pinot.svg" alt="Apache Pinot" >
   </div>
   <div class="db-container db-container-bg">
     <img src="images/logo-cassandra.png" data-origin="images/logo-cassandra.png" alt="Cassandra" >

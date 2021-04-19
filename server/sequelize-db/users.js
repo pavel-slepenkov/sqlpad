@@ -11,7 +11,16 @@ module.exports = function (sequelize) {
       },
       email: {
         type: DataTypes.STRING,
-        allowNull: false,
+        allowNull: true,
+        validate: {
+          isLowercase: true,
+        },
+      },
+      // User account ID for LDAP authentication
+      // Currently this is used as a fallback when ldap profile.mail is not available
+      ldapId: {
+        type: DataTypes.STRING,
+        allowNull: true,
         validate: {
           isLowercase: true,
         },
@@ -23,6 +32,9 @@ module.exports = function (sequelize) {
           isLowercase: true,
           isIn: [['admin', 'editor', 'viewer']],
         },
+      },
+      syncAuthRole: {
+        type: DataTypes.BOOLEAN,
       },
       name: {
         type: DataTypes.STRING,

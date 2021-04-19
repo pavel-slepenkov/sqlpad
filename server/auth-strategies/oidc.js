@@ -1,25 +1,18 @@
 const passport = require('passport');
-const OidcStrategy = require('passport-openidconnect').Strategy;
 const appLog = require('../lib/app-log');
 const checkAllowedDomains = require('../lib/check-allowed-domains.js');
+const { Issuer, Strategy } = require('openid-client');
 
-async function passportOidcStrategyHandler(
-  req,
-  issuer,
-  sub,
-  profile,
-  accessToken,
-  refreshToken,
-  done
-) {
+async function openidClientHandler(req, tokenSet, userinfo, done) {
   const { models, config, appLog, webhooks } = req;
-  const _json = profile._json || {};
 
-  // _json.sub appears to be an id. Is it? Should .sub be used for SQLPad user id?
-  // Unsure if email ever doesn't exist if email claim is requested,
-  // but just in case fall back to preferred_username
+  const _json = tokenSet.claims() || {};
+
   const email = _json.email || _json.preferred_username;
-  const name = _json.name;
+  let name = _json.name;
+  if (!name && _json.given_name && _json.family_name) {
+    name = `${_json.given_name} ${_json.family_name}`;
+  }
 
   if (!email) {
     appLog.debug('OIDC email not provided');
@@ -29,10 +22,7 @@ async function passportOidcStrategyHandler(
   }
 
   try {
-    let [openAdminRegistration, user] = await Promise.all([
-      models.users.adminRegistrationOpen(),
-      models.users.findOneByEmail(email),
-    ]);
+    let user = await models.users.findOneByEmail(email);
 
     if (user) {
       if (user.disabled) {
@@ -48,11 +38,11 @@ async function passportOidcStrategyHandler(
       return done(null, newUser);
     }
     const allowedDomains = config.get('allowedDomains');
-    if (openAdminRegistration || checkAllowedDomains(allowedDomains, email)) {
+    if (checkAllowedDomains(allowedDomains, email)) {
       const newUser = await models.users.create({
         name,
         email,
-        role: openAdminRegistration ? 'admin' : 'editor',
+        role: 'editor',
         signupAt: new Date(),
       });
       webhooks.userCreated(newUser);
@@ -75,28 +65,31 @@ async function passportOidcStrategyHandler(
  * Adds OIDC auth strategy if OIDC auth is configured
  * @param {object} config
  */
-function enableOidc(config) {
+async function enableOidc(config) {
   if (config.oidcConfigured()) {
-    appLog.info('Enabling OIDC authentication strategy.');
+    appLog.info('Enabling OIDC authentication strategy (via openid-client).');
 
     const baseUrl = config.get('baseUrl');
     const publicUrl = config.get('publicUrl');
 
+    const issuer = await Issuer.discover(config.get('oidcIssuer'));
+
+    const client = new issuer.Client({
+      client_id: config.get('oidcClientId'),
+      client_secret: config.get('oidcClientSecret'),
+      redirect_uris: [`${publicUrl}${baseUrl}/auth/oidc/callback`],
+      post_logout_redirect_uris: [`${publicUrl}${baseUrl}`],
+    });
+
     passport.use(
       'oidc',
-      new OidcStrategy(
+      new Strategy(
         {
           passReqToCallback: true,
-          issuer: config.get('oidcIssuer'),
-          authorizationURL: config.get('oidcAuthorizationUrl'),
-          tokenURL: config.get('oidcTokenUrl'),
-          userInfoURL: config.get('oidcUserInfoUrl'),
-          clientID: config.get('oidcClientId'),
-          clientSecret: config.get('oidcClientSecret'),
-          callbackURL: publicUrl + baseUrl + '/auth/oidc/callback',
-          scope: 'openid profile email',
+          client,
+          params: { scope: 'openid profile email' },
         },
-        passportOidcStrategyHandler
+        openidClientHandler
       )
     );
   }

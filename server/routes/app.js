@@ -8,19 +8,19 @@ const wrap = require('../lib/wrap');
  * @param {Res} res
  */
 async function getApp(req, res) {
-  const { config, models } = req;
-  const adminRegistrationOpen = await models.users.adminRegistrationOpen();
+  const { config } = req;
   const currentUser =
     req.isAuthenticated() && req.user
       ? {
           id: req.user.id,
           email: req.user.email,
           role: req.user.role,
+          name: req.user.name,
+          ldapId: req.user.ldapId,
         }
       : undefined;
 
   return res.utils.data({
-    adminRegistrationOpen,
     currentUser,
     config: {
       allowCsvDownload: config.get('allowCsvDownload'),
@@ -28,22 +28,17 @@ async function getApp(req, res) {
       defaultConnectionId: config.get('defaultConnectionId'),
       editorWordWrap: config.get('editorWordWrap'),
       googleAuthConfigured: config.googleAuthConfigured(),
-      localAuthConfigured: !(
-        config.get('userpassAuthDisabled') || config.get('disableUserpassAuth')
-      ),
+      localAuthConfigured: !config.get('userpassAuthDisabled'),
       publicUrl: config.get('publicUrl'),
-      samlConfigured: Boolean(
-        config.get('samlEntryPoint') || config.get('samlEntryPoint_d')
+      samlConfigured: Boolean(config.get('samlEntryPoint')),
+      samlLinkHtml: config.get('samlLinkHtml'),
+      ldapConfigured: config.get('ldapAuthEnabled'),
+      ldapRolesConfigured: Boolean(
+        config.get('ldapRoleAdminFilter') || config.get('ldapRoleEditorFilter')
       ),
-      samlLinkHtml: config.get('samlLinkHtml') || config.get('samlLinkHtml_d'),
-      smtpConfigured: config.smtpConfigured(),
-      ldapConfigured:
-        config.get('ldapAuthEnabled') || config.get('enableLdapAuth'),
-      oidcConfigured: config.oidcConfigured(),
+      oidcConfigured: config.oidcLegacyConfigured() || config.oidcConfigured(),
       oidcLinkHtml: config.get('oidcLinkHtml'),
-      showServiceTokensUI: Boolean(
-        config.get('serviceTokenSecret') || config.get('serviceTokenSecret_d')
-      ),
+      showServiceTokensUI: Boolean(config.get('serviceTokenSecret')),
     },
     version: packageJson.version,
   });

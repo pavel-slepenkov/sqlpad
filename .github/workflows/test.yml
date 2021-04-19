@@ -12,7 +12,7 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [12.x]
+        node-version: [12.x, 14.x, 15.x]
 
     steps:
       - uses: actions/checkout@v2
@@ -34,12 +34,13 @@ jobs:
   test:
     needs: build
     runs-on: ubuntu-20.04
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false # if one job fails, others will not be aborted
       matrix:
-        backendtype: [ '', 'mssql','mysql', 'mariadb', 'postgres' ]
-        node-version: [12.x]
+        backendtype: ['', 'mssql', 'mysql', 'mariadb', 'postgres']
+        node-version: [12.x, 14.x, 15.x]
 
     steps:
       - uses: actions/checkout@v2
@@ -48,6 +49,12 @@ jobs:
         uses: actions/setup-node@v1
         with:
           node-version: ${{ matrix.node-version }}
+
+      - name: Start redis
+        run: docker-compose -f server/docker-compose.yml up -d redis &
+
+      - name: Start ldap
+        run: docker-compose -f server/docker-compose.yml up -d ldap &
 
       - name: Start service for backend server
         if: ${{ matrix.backendtype }}
@@ -66,6 +73,13 @@ jobs:
         if: ${{ matrix.backendtype }}
         run: |
           until  docker ps | fgrep "(healthy)" | grep  ${{ matrix.backendtype }} ; do
+            docker ps
+            sleep 0.5
+          done
+
+      - name: Verify ldap is healthy before starting
+        run: |
+          until  docker ps | fgrep "(healthy)" | grep test-openldap ; do
             docker ps
             sleep 0.5
           done

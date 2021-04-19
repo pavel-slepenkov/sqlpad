@@ -8,7 +8,7 @@ For the most part, SQLPad is "finished" in the sense that it will not radically 
 
 ## Contributing Bug Reports
 
-SQLPad is using [GitHub Issues](https://github.com/rickbergfalk/sqlpad/issues) for public bugs. Before filing a new bug, try to make sure your problem doesn't already exist.
+SQLPad is using [GitHub Issues](https://github.com/sqlpad/sqlpad/issues) for public bugs. Before filing a new bug, try to make sure your problem doesn't already exist.
 
 When filing a bug, please provide as much detail as you can including your environment (OS, browser, node.js version, etc.) and how you're running SQLPad (directly via node or docker container).
 
@@ -36,14 +36,10 @@ If you've made a significant contribution to SQLPad you'll be invited to join as
 
 No pressure to accept the invite or even do anything with the access. Contribute as much or as little as you'd like, even if it is just to weigh in on the direction of the project.
 
-## Contributing Money
-
-Interested in paid support, sponsorship, or contracting out SQLPad development work? Please reach out to rick.bergfalk@gmail.com.
-
 ## License
 
 By contributing to SQLPad, you agree that your contributions will be licensed under its MIT license.
 
 ## Getting Started
 
-Ready to get started? Refer to [Developer Guide](https://github.com/rickbergfalk/sqlpad/blob/master/DEVELOPER-GUIDE.md) to learn how to build and orient yourself with the project.
+Ready to get started? Refer to [DEVELOPER-GUIDE.md](https://github.com/sqlpad/sqlpad/blob/master/DEVELOPER-GUIDE.md) to learn how to build and orient yourself with the project.

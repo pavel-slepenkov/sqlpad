@@ -5,7 +5,6 @@ const formatLinkHeader = require('format-link-header');
 const queryString = require('query-string');
 const router = require('express').Router();
 const mustBeAuthenticated = require('../middleware/must-be-authenticated.js');
-const pushQueryToSlack = require('../lib/push-query-to-slack');
 const decorateQueryUserAccess = require('../lib/decorate-query-user-access');
 const wrap = require('../lib/wrap');
 
@@ -15,14 +14,13 @@ const wrap = require('../lib/wrap');
  */
 async function deleteQuery(req, res) {
   const { models, params, user } = req;
-  const query = await models.findQueryById(params.id);
+  const query = await models.queries.findOneById(params.id);
   if (!query) {
     return res.utils.notFound();
   }
   const decorated = decorateQueryUserAccess(query, user);
   if (decorated.canDelete) {
     await models.queries.removeById(params.id);
-    await models.queryAcl.removeByQueryId(params.id);
     return res.utils.data();
   }
 
@@ -51,7 +49,7 @@ router.delete('/api/queries/:id', mustBeAuthenticated, wrap(deleteQuery));
 //   AND id IN (SELECT query_id FROM query_tags WHERE tag = 'tag1')
 //   AND id IN (SELECT query_id FROM query_tags WHERE tag = 'tag2')
 //   -- for search
-//   AND (name LIKE '%search%' OR query_text LIKE '%search%')
+//   AND (LOWER(name) LIKE '%search_in_lowercase%' OR LOWER(query_text) LIKE '%search_in_lowercase%')
 // ORDER BY
 //   name ASC
 //   -- updated_at DESC
@@ -141,9 +139,9 @@ async function listQueries(req, res) {
   }
 
   if (search) {
-    params.search = `%${search}%`;
+    params.search = `%${search.toLowerCase()}%`;
     whereSqls.push(
-      `( queries.name LIKE :search OR queries.query_text LIKE :search )`
+      `( LOWER(queries.name) LIKE :search OR LOWER(queries.query_text) LIKE :search )`
     );
   }
 
@@ -278,7 +276,7 @@ router.get('/api/queries', mustBeAuthenticated, wrap(listQueries));
  */
 async function getQuery(req, res) {
   const { models, user, params } = req;
-  const query = await models.findQueryById(params.id);
+  const query = await models.queries.findOneById(params.id);
 
   if (!query) {
     return res.utils.notFound();
@@ -313,7 +311,7 @@ async function createQuery(req, res) {
     acl,
   };
 
-  const newQuery = await models.upsertQuery(query);
+  const newQuery = await models.queries.create(query);
 
   let connection;
   if (connectionId) {
@@ -321,9 +319,6 @@ async function createQuery(req, res) {
   }
 
   webhooks.queryCreated(newQuery, connection);
-
-  // This is async, but save operation doesn't care about when/if finished
-  pushQueryToSlack(req.config, newQuery, user);
 
   return res.utils.data(decorateQueryUserAccess(newQuery, user));
 }
@@ -337,7 +332,7 @@ router.post('/api/queries', mustBeAuthenticated, wrap(createQuery));
 async function updateQuery(req, res) {
   const { models, params, user, body } = req;
 
-  const query = await models.findQueryById(params.id);
+  const query = await models.queries.findOneById(params.id);
   if (!query) {
     return res.utils.notFound();
   }
@@ -360,7 +355,7 @@ async function updateQuery(req, res) {
     acl,
   });
 
-  const updatedQuery = await models.upsertQuery(query);
+  const updatedQuery = await models.queries.update(params.id, query);
   const data = decorateQueryUserAccess(updatedQuery, user);
   return res.utils.data(data);
 }
